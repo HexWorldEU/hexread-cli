@@ -1,0 +1,137 @@
+# GoReleaser config for the `hexread` CLI. Builds a single static, cgo-free binary for 6
+# targets, archives + checksums them, generates an SBOM, and cosign-signs the checksums (keyless
+# OIDC). A Homebrew tap + a Scoop bucket + the curl|sh installer distribute it.
+#
+# Run a snapshot locally:  goreleaser release --snapshot --clean
+# Real release: tag `vX.Y.Z` → the Release workflow runs `goreleaser release`.
+version: 2
+project_name: hexread # NOTE: stays `hexread` (not hexread-cli) so the archive names match install.sh.
+
+before:
+  hooks:
+    - go version
+
+builds:
+  - id: hexread
+    main: ./cmd/hexread
+    binary: hexread
+    env:
+      - CGO_ENABLED=0 # static, no libc - runs anywhere
+    flags:
+      - -trimpath
+    mod_timestamp: "{{ .CommitTimestamp }}" # reproducible builds: no wall-clock in the binary
+    ldflags:
+      - -s -w
+      - -X github.com/HexWorldEU/hexread-cli/internal/version.Version={{ .Version }}
+      - -X github.com/HexWorldEU/hexread-cli/internal/version.Commit={{ .ShortCommit }}
+      - -X github.com/HexWorldEU/hexread-cli/internal/version.Date={{ .CommitDate }}
+      # Override via HEXREAD_DEVICE_AUTH_URL / HEXREAD_TOKEN_URL / HEXREAD_CLIENT_ID:
+      - -X github.com/HexWorldEU/hexread-cli/internal/cli.defaultDeviceAuthURL=https://auth.hexread.com/oauth/v2/device_authorization
+      - -X github.com/HexWorldEU/hexread-cli/internal/cli.defaultTokenURL=https://auth.hexread.com/oauth/v2/token
+      - -X github.com/HexWorldEU/hexread-cli/internal/cli.defaultClientID=381767340729171970
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: hexread
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE*
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+sboms:
+  - artifacts: archive # syft SBOM per archive (supply-chain transparency)
+
+# Cosign keyless (Sigstore OIDC) signature over the checksums file - the curl|sh installer
+# verifies this before installing when cosign is present (see scripts/install.sh).
+signs:
+  - cmd: cosign
+    certificate: ${artifact}.pem
+    args:
+      - sign-blob
+      - --yes
+      - --output-signature=${signature}
+      - --output-certificate=${certificate}
+      - ${artifact}
+    artifacts: checksum
+    output: true
+
+# Homebrew cask (pre-built binary): brew install HexWorldEU/tap/hexread
+homebrew_casks:
+  - name: hexread
+    repository:
+      owner: HexWorldEU
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}" # cross-repo push needs the PAT, not the default GITHUB_TOKEN
+    skip_upload: auto # never publish a prerelease (-rc) tag to the tap
+    homepage: https://hexread.com
+    description: Command-line client for HexRead - convert PDFs and images to Markdown
+    # Not Apple-notarized: strip the quarantine bit so hexread runs without the
+    # macOS "unidentified developer" block.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/hexread"]
+          end
+
+scoops:
+  - repository:
+      owner: HexWorldEU
+      name: scoop-bucket
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}" # same shared cross-repo publish PAT
+    skip_upload: auto # never publish a prerelease (-rc) tag to the bucket
+    homepage: https://hexread.com
+    description: Command-line client for HexRead - convert PDFs and images to Markdown
+    license: MIT
+
+# winget (Windows) - pushes generated manifests to a fork of microsoft/winget-pkgs and opens a PR
+# to the public catalog on each release. End users then: `winget install HexWorld.HexRead`.
+winget:
+  - name: hexread
+    publisher: HexWorld Solutions GmbH
+    license: MIT
+    package_identifier: HexWorld.HexRead
+    homepage: https://hexread.com
+    short_description: Convert PDFs and images to Markdown (HexRead CLI).
+    description: |
+      The official command-line client for HexRead - convert PDFs and images to
+      Markdown (+JSON) via the HexRead API.
+    publisher_url: https://hexread.com
+    publisher_support_url: https://github.com/HexWorldEU/hexread-cli/issues
+    license_url: https://github.com/HexWorldEU/hexread-cli/blob/main/LICENSE
+    release_notes_url: https://github.com/HexWorldEU/hexread-cli/releases/tag/{{ .Tag }}
+    tags: [pdf, markdown, ocr, cli, converter]
+    repository:
+      owner: HexWorldEU
+      name: winget-pkgs # our fork of microsoft/winget-pkgs
+      branch: "hexread-{{ .Version }}"
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+      pull_request:
+        enabled: true
+        draft: false
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master
+
+release:
+  github:
+    owner: HexWorldEU
+    name: hexread-cli
+  prerelease: auto
+
+changelog:
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"

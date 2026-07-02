@@ -1,0 +1,34 @@
+name: Release
+
+# Tagging `v*` (e.g. v0.6.0) publishes the cosign-signed `hexread` CLI binaries to GitHub
+# Releases and pushes the Homebrew formula + Scoop manifest.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the GitHub release / upload assets
+  id-token: write # cosign keyless (OIDC)
+
+jobs:
+  cli:
+    name: Release the hexread CLI (cosign-signed)
+    runs-on: ubuntu-latest
+    steps:
+      # Actions pinned to commit SHAs (privileged job); Dependabot updates the pins.
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: stable # releases always carry the latest Go security patches
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+        with:
+          version: "~> v2" # pin the major
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # writes the release in this repo
+          # Cross-repo PAT for the brew/scoop/winget pushes (the default token can't reach them).
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}

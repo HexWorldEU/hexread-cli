@@ -1,0 +1,62 @@
+# Task runner for the hexread CLI (go-task). `task --list` shows everything.
+version: "3"
+
+vars:
+  GO: go
+  CLI_TARGETS: linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
+
+tasks:
+  default:
+    cmds:
+      - task --list
+
+  build:
+    desc: Build the hexread binary into ./hexread
+    cmds:
+      - "{{.GO}} build -o hexread ./cmd/hexread"
+
+  test:
+    desc: Run tests with the race detector
+    cmds:
+      - "{{.GO}} test -race -cover ./..."
+
+  lint:
+    desc: go vet
+    cmds:
+      - "{{.GO}} vet ./..."
+
+  fmt:
+    desc: Format Go sources
+    cmds:
+      - gofmt -w .
+
+  fmt-check:
+    desc: Fail if any Go source needs formatting
+    cmds:
+      - |
+        out="$(gofmt -l .)"
+        [ -z "$out" ] || { echo "gofmt needed on:"; echo "$out"; exit 1; }
+
+  cli-crosscompile:
+    desc: Verify the CLI cross-compiles cgo-free for all 6 release targets
+    cmds:
+      - |
+        set -e
+        for t in {{.CLI_TARGETS}}; do
+          echo "→ $t"
+          CGO_ENABLED=0 GOOS=${t%/*} GOARCH=${t#*/} {{.GO}} build -o /dev/null ./cmd/hexread
+        done
+        echo "✓ cgo-free for all targets"
+
+  release-snapshot:
+    desc: Build a local release snapshot (no publish) with GoReleaser
+    cmds:
+      - goreleaser release --snapshot --clean
+
+  check:
+    desc: Everything CI runs
+    cmds:
+      - task: fmt-check
+      - task: lint
+      - task: test
+      - task: cli-crosscompile

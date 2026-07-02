@@ -1,0 +1,15 @@
+# Keep the Go module graph and the pinned GitHub Actions fresh - this is a signed,
+# publicly distributed binary, so dependency drift is a supply-chain concern.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go-deps:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

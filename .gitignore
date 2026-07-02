@@ -1,0 +1,10 @@
+# Build output
+/dist/
+/hexread
+/hexread.exe
+
+# go-task fingerprint cache
+/.task/
+
+# Local development notes
+CLAUDE.md
