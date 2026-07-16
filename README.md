@@ -33,7 +33,7 @@ Supported platforms: **Linux, macOS, Windows** on **amd64** and **arm64**.
 
 ```sh
 cosign verify-blob \
-  --certificate checksums.txt.pem --signature checksums.txt.sig \
+  --bundle checksums.txt.sigstore.json \
   --certificate-identity-regexp 'https://github.com/HexWorldEU/hexread-cli/.github/workflows/release.yml@refs/tags/v.*' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
   checksums.txt

@@ -68,11 +68,10 @@ main() {
   # 1) Verify the checksums file's cosign signature. Required by default: if cosign is not installed the
   #    install ABORTS (never a silent warn-and-continue) unless HEXREAD_REQUIRE_COSIGN=0 was set.
   if command -v cosign >/dev/null 2>&1; then
-    curl -fsSL -o checksums.txt.sig "${base}/checksums.txt.sig"
-    curl -fsSL -o checksums.txt.pem "${base}/checksums.txt.pem"
+    curl -fsSL -o checksums.txt.sigstore.json "${base}/checksums.txt.sigstore.json"
     echo "Verifying signature (cosign)…"
     cosign verify-blob \
-      --certificate checksums.txt.pem --signature checksums.txt.sig \
+      --bundle checksums.txt.sigstore.json \
       --certificate-identity-regexp "$CERT_IDENTITY_RE" \
       --certificate-oidc-issuer "$CERT_OIDC_ISSUER" \
       checksums.txt >/dev/null || { echo "error: signature verification FAILED - aborting" >&2; exit 1; }

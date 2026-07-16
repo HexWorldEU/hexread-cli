@@ -49,17 +49,17 @@ checksum:
 sboms:
   - artifacts: archive # syft SBOM per archive (supply-chain transparency)
 
-# Cosign keyless (Sigstore OIDC) signature over the checksums file - the curl|sh installer
-# verifies this before installing when cosign is present (see scripts/install.sh).
+# Cosign keyless (Sigstore OIDC) signature over the checksums file, emitted as a single Sigstore
+# bundle (checksums.txt.sigstore.json) that carries the signature + certificate. The curl|sh
+# installer verifies it before installing when cosign is present (see scripts/install.sh).
 signs:
   - cmd: cosign
-    certificate: ${artifact}.pem
+    signature: ${artifact}.sigstore.json
     args:
       - sign-blob
-      - --yes
-      - --output-signature=${signature}
-      - --output-certificate=${certificate}
+      - --bundle=${signature}
       - ${artifact}
+      - --yes
     artifacts: checksum
     output: true
 
@@ -96,6 +96,7 @@ scoops:
 # to the public catalog on each release. End users then: `winget install HexWorld.HexRead`.
 winget:
   - name: hexread
+    skip_upload: auto # never open a winget PR for a prerelease (-rc) tag
     publisher: HexWorld Solutions GmbH
     license: MIT
     package_identifier: HexWorld.HexRead
