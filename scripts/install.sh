@@ -52,7 +52,10 @@ main() {
   case "$arch" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) echo "unsupported arch: $arch" >&2; exit 1 ;; esac
   case "$os" in linux|darwin) ;; *) echo "unsupported OS: $os (use scoop or winget on Windows)" >&2; exit 1 ;; esac
 
-  tag=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep -m1 '"tag_name"' | cut -d'"' -f4)
+  # Fetch fully before grepping: `curl | grep -m1` makes grep close the pipe on first match,
+  # and curl then reports a spurious `curl: (23)` write error to the user.
+  release_json=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest")
+  tag=$(printf '%s' "$release_json" | grep -m1 '"tag_name"' | cut -d'"' -f4)
   [ -n "$tag" ] || { echo "could not determine the latest release" >&2; exit 1; }
   ver=${tag#v}
   base="https://github.com/${REPO}/releases/download/${tag}"
