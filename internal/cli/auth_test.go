@@ -69,6 +69,37 @@ func TestLoginDeviceFlowStoresExchangedKey(t *testing.T) {
 	}
 }
 
+// TestWhoamiInvalidKeyMessageBySource - a 401 names the credential's source: the stored-key
+// variant hints at re-login, the env-key variant names HEXREAD_API_KEY (re-login would not
+// help; the env var takes precedence over the store).
+func TestWhoamiInvalidKeyMessageBySource(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"type":"authentication_error","code":"invalid_api_key","message":"Invalid or revoked API key."}`)
+	}))
+	defer srv.Close()
+
+	_, code, errOut := runCLI(t, "hr_live_stored", "whoami", "--base-url", srv.URL+"/v1")
+	if code != exitAuth || !strings.Contains(errOut, "stored credential is invalid") {
+		t.Fatalf("stored-key whoami: code=%d stderr=%q", code, errOut)
+	}
+
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir) // no credential file anywhere
+	t.Setenv("HOME", dir)
+	t.Setenv("HEXREAD_KEYRING", "")
+	t.Setenv("HEXREAD_API_KEY", "hr_live_env_key")
+	root := newRoot()
+	root.SetArgs([]string{"whoami", "--base-url", srv.URL + "/v1"})
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	err := root.Execute()
+	if exitCode(err) != exitAuth || err == nil || !strings.Contains(err.Error(), "HEXREAD_API_KEY is invalid") {
+		t.Fatalf("env-key whoami: err=%v", err)
+	}
+}
+
 // TestLoginDeviceFlowExchangeRejected - a 401 from the exchange endpoint is a clean auth failure
 // (exit 3) and nothing is stored.
 func TestLoginDeviceFlowExchangeRejected(t *testing.T) {

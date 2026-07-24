@@ -1,13 +1,13 @@
 #!/usr/bin/env sh
 # HexRead CLI installer. Downloads the latest `hexread` release, verifies it, and installs the binary.
-# Verification is REQUIRED BY DEFAULT: a cosign keyless signature over the checksums (needs cosign on
-# PATH) PLUS the per-archive sha256. Set HEXREAD_REQUIRE_COSIGN=0 to fall back to sha256-only (NOT
-# recommended: the checksums come from the same release, so sha256 alone gives no integrity against a
-# tampered release). Any verification mismatch aborts before anything is installed.
+# The per-archive sha256 is always checked. When cosign is on PATH the checksums file's keyless
+# signature is verified too; otherwise the installer continues on sha256 alone. Set
+# HEXREAD_REQUIRE_COSIGN=1 (or --require-cosign) to require the signature (aborts if cosign is
+# missing). Any mismatch aborts before anything is installed.
 #
 #   curl -fsSL https://hexread.com/install | sh
 #   curl -fsSL https://hexread.com/install | sh -s -- --bin-dir ~/.local/bin
-#   HEXREAD_REQUIRE_COSIGN=0 curl -fsSL https://hexread.com/install | sh   # sha256-only (discouraged)
+#   HEXREAD_REQUIRE_COSIGN=1 curl -fsSL https://hexread.com/install | sh   # require a cosign signature
 set -eu
 # pipefail is not POSIX (dash lacks it); enable it where the shell supports it (bash/ksh/zsh) so a
 # broken curl in a pipe fails the step instead of feeding a truncated file downstream.
@@ -19,8 +19,8 @@ set -eu
 main() {
   REPO="HexWorldEU/hexread-cli"
   BIN_DIR="${HEXREAD_BIN_DIR:-/usr/local/bin}"
-  # Signature verification is ON by default; only an explicit HEXREAD_REQUIRE_COSIGN=0 disables it.
-  REQUIRE_COSIGN="${HEXREAD_REQUIRE_COSIGN:-1}"
+  # Best-effort by default; HEXREAD_REQUIRE_COSIGN=1 / --require-cosign makes the signature mandatory.
+  REQUIRE_COSIGN="${HEXREAD_REQUIRE_COSIGN:-0}"
   [ "$REQUIRE_COSIGN" = "0" ] && REQUIRE_COSIGN=""
   # The cosign keyless identity that signed the release (GitHub Actions OIDC).
   CERT_IDENTITY_RE="https://github.com/${REPO}/.github/workflows/release.yml@refs/tags/v.*"
@@ -68,8 +68,8 @@ main() {
   curl -fsSL -o "$archive"    "${base}/${archive}"
   curl -fsSL -o checksums.txt "${base}/checksums.txt"
 
-  # 1) Verify the checksums file's cosign signature. Required by default: if cosign is not installed the
-  #    install ABORTS (never a silent warn-and-continue) unless HEXREAD_REQUIRE_COSIGN=0 was set.
+  # 1) Verify the checksums file's cosign signature when cosign is present. If it was made mandatory,
+  #    a missing cosign aborts here rather than falling back to sha256-only.
   if command -v cosign >/dev/null 2>&1; then
     curl -fsSL -o checksums.txt.sigstore.json "${base}/checksums.txt.sigstore.json"
     echo "Verifying signature (cosign)…"
@@ -79,13 +79,13 @@ main() {
       --certificate-oidc-issuer "$CERT_OIDC_ISSUER" \
       checksums.txt >/dev/null || { echo "error: signature verification FAILED - aborting" >&2; exit 1; }
   elif [ -n "$REQUIRE_COSIGN" ]; then
-    echo "error: cosign is required to verify this download but is not installed." >&2
-    echo "       Install it (https://docs.sigstore.dev/cosign/installation/) and re-run, or -" >&2
-    echo "       accepting sha256-only integrity - re-run with HEXREAD_REQUIRE_COSIGN=0." >&2
+    echo "error: cosign signature was required (--require-cosign / HEXREAD_REQUIRE_COSIGN=1) but cosign" >&2
+    echo "       is not installed. Install it (https://docs.sigstore.dev/cosign/installation/) and" >&2
+    echo "       re-run, or drop the requirement to accept the default sha256-only verification." >&2
     exit 1
   else
-    echo "warning: HEXREAD_REQUIRE_COSIGN=0 - skipping signature verification (sha256 only; no" >&2
-    echo "         protection against a tampered release). Install cosign for full verification." >&2
+    echo "note: cosign not installed - verifying with sha256 only. Install cosign (or set" >&2
+    echo "      HEXREAD_REQUIRE_COSIGN=1 / pass --require-cosign) for full signature verification." >&2
   fi
 
   # 2) Verify the archive's sha256 against the checksums file.

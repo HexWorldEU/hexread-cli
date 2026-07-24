@@ -22,10 +22,12 @@ func newLogin() *cobra.Command {
 	var keyStdin, noValidate bool
 	cmd := &cobra.Command{
 		Use:   "login",
-		Short: "Store an API key in the credential store",
-		Long: "Sign in to HexRead by storing an API key (create one in your HexRead dashboard).\n" +
-			"Prefer --key-stdin so the secret never appears in shell history or process lists.\n" +
-			"The key is validated against the API unless --no-validate is given.",
+		Short: "Sign in via browser, or store an API key",
+		Long: "Sign in to HexRead. With no flags, this opens browser sign-in (an OAuth device\n" +
+			"grant) and stores the resulting API key. Headless setups pass an existing key\n" +
+			"instead (create one in your HexRead dashboard); prefer --key-stdin so the secret\n" +
+			"never appears in shell history or process lists. A passed key is validated\n" +
+			"against the API unless --no-validate is given.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -164,6 +166,9 @@ func newWhoami() *cobra.Command {
 			if err != nil {
 				var ae *client.APIError
 				if errors.As(err, &ae) && ae.Status == http.StatusUnauthorized {
+					if strings.TrimSpace(os.Getenv("HEXREAD_API_KEY")) != "" {
+						return withExit(exitAuth, errors.New("HEXREAD_API_KEY is invalid or revoked"))
+					}
 					return withExit(exitAuth, errors.New("stored credential is invalid - run `hexread login`"))
 				}
 				return err

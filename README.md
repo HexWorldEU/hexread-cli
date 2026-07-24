@@ -17,9 +17,6 @@ to the HexRead API at `https://api.hexread.com/v1` and never processes documents
 | **go install** | `go install github.com/HexWorldEU/hexread-cli/cmd/hexread@latest` |
 | **Manual** | Download from [Releases](https://github.com/HexWorldEU/hexread-cli/releases), verify, extract |
 
-> **Pre-release:** HexRead hasn't launched yet - until the first tagged release, install
-> from source: `go install github.com/HexWorldEU/hexread-cli/cmd/hexread@main`.
-
 The `curl | sh` installer always verifies each archive's SHA-256 against the release's
 checksums file, and verifies the checksums file's **cosign** signature (keyless, GitHub
 OIDC) when cosign is installed - pass `--require-cosign` (or set
