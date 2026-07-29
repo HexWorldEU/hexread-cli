@@ -21,9 +21,10 @@ tasks:
       - "{{.GO}} test -race -cover ./..."
 
   lint:
-    desc: go vet
+    desc: go vet + staticcheck
     cmds:
       - "{{.GO}} vet ./..."
+      - "{{.GO}} run honnef.co/go/tools/cmd/staticcheck@latest ./..."
 
   fmt:
     desc: Format Go sources
