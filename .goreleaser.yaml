@@ -28,7 +28,7 @@ builds:
       # Override via HEXREAD_DEVICE_AUTH_URL / HEXREAD_TOKEN_URL / HEXREAD_CLIENT_ID:
       - -X github.com/HexWorldEU/hexread-cli/internal/cli.defaultDeviceAuthURL=https://auth.hexread.com/oauth/v2/device_authorization
       - -X github.com/HexWorldEU/hexread-cli/internal/cli.defaultTokenURL=https://auth.hexread.com/oauth/v2/token
-      - -X github.com/HexWorldEU/hexread-cli/internal/cli.defaultClientID=381767340729171970
+      - -X github.com/HexWorldEU/hexread-cli/internal/cli.defaultClientID=383197822167678979
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
 
