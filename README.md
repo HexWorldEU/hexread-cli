@@ -24,6 +24,9 @@ OIDC) when cosign is installed - pass `--require-cosign` (or set
 mismatch aborts before anything is installed. `go install` builds the latest tagged
 release from source (Go 1.25+).
 
+It installs to `/usr/local/bin`; pass `--bin-dir DIR` or set `HEXREAD_BIN_DIR` to choose
+another (e.g. `~/.local/bin`, which needs no sudo).
+
 Supported platforms: **Linux, macOS, Windows** on **amd64** and **arm64**.
 
 ### Verify a download manually
@@ -31,7 +34,7 @@ Supported platforms: **Linux, macOS, Windows** on **amd64** and **arm64**.
 ```sh
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
-  --certificate-identity-regexp 'https://github.com/HexWorldEU/hexread-cli/.github/workflows/release.yml@refs/tags/v.*' \
+  --certificate-identity-regexp '^https://github\.com/HexWorldEU/hexread-cli/\.github/workflows/release\.yml@refs/tags/v.+$' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
   checksums.txt
 ```
@@ -64,7 +67,9 @@ Precedence: **flags > environment > config file > defaults**.
 | `HEXREAD_BASE_URL` | API base URL (default `https://api.hexread.com/v1`) |
 | `HEXREAD_KEYRING` | credential store: `file` (default, a 0600 file) or `system` (OS keychain) |
 
-Optional config file `~/.config/hexread/config.yaml` (flat `key: value` lines):
+Optional config file `hexread/config.yaml` in your OS config directory - `~/.config` on
+Linux, `~/Library/Application Support` on macOS, `%AppData%` on Windows (flat `key: value`
+lines):
 
 ```yaml
 base-url: https://api.hexread.com/v1

@@ -34,6 +34,8 @@ jobs:
             CGO_ENABLED=0 GOOS=${t%/*} GOARCH=${t#*/} go build -o /dev/null ./cmd/hexread
           done
           echo "✓ cgo-free for all targets"
+      - run: ./scripts/check-archive-name.sh
+      - run: shellcheck scripts/*.sh # preinstalled on the runner image
 
   security:
     runs-on: ubuntu-latest

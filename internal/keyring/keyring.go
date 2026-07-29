@@ -51,18 +51,31 @@ type File struct{ path string }
 
 func NewFile(path string) *File { return &File{path: path} }
 
+// DefaultFile resolves <config-dir>/hexread/credential. With no config dir and no home the path
+// would be relative, putting the API key in the working directory; it is left empty instead and
+// Get/Set fail with errNoConfigDir.
 func DefaultFile() *File {
 	dir, err := os.UserConfigDir()
 	if err != nil || dir == "" {
 		home, _ := os.UserHomeDir()
 		dir = filepath.Join(home, ".config")
 	}
+	if !filepath.IsAbs(dir) {
+		return &File{}
+	}
 	return &File{path: filepath.Join(dir, "hexread", "credential")}
 }
 
+var errNoConfigDir = errors.New(
+	"no config directory: set HOME or XDG_CONFIG_HOME, or use HEXREAD_API_KEY")
+
 // Set writes the credential atomically (temp file + rename) so a crash can't leave a truncated
-// credential, and never widens the permissions of an existing file.
+// credential. The new file is always mode 0600: rename replaces the inode, so an existing file's
+// mode is not preserved.
 func (f *File) Set(s string) error {
+	if f.path == "" {
+		return errNoConfigDir
+	}
 	dir := filepath.Dir(f.path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -87,6 +100,9 @@ func (f *File) Set(s string) error {
 }
 
 func (f *File) Get() (string, error) {
+	if f.path == "" {
+		return "", errNoConfigDir
+	}
 	b, err := os.ReadFile(f.path)
 	if os.IsNotExist(err) {
 		return "", ErrNotFound
@@ -102,6 +118,9 @@ func (f *File) Get() (string, error) {
 }
 
 func (f *File) Delete() error {
+	if f.path == "" {
+		return nil // nothing could have been written there
+	}
 	err := os.Remove(f.path)
 	if os.IsNotExist(err) {
 		return nil

@@ -65,20 +65,19 @@ func (s JobState) Terminal() bool { return s.Status == "completed" || s.Status =
 // simply omitted from the multipart form (empty string → not sent).
 type ConvertOptions struct {
 	Filename       string
-	Formats        string
 	Lang           string
 	Model          string // auto | mineru-2.5 | granite-docling | paddleocr-vl
 	Prefer         string // sync | async
-	Delivery       string // inline | sse | webhook
-	Webhook        string
-	WebhookSecret  string
 	IdempotencyKey string
 }
 
 // ConvertResponse is exactly one of Inline (200 sync) or Job (202 async).
 type ConvertResponse struct {
 	Inline *ConvertResult
-	Job    *AsyncJob
+	// InlineRaw is the 200 body verbatim. `convert --json` prints it as-is, so the sync path's JSON
+	// matches the async path's and no field this client does not model is dropped by a re-marshal.
+	InlineRaw []byte
+	Job       *AsyncJob
 }
 
 // Convert streams `src` to POST /v1/convert as multipart/form-data (never buffering the whole file)
@@ -90,9 +89,7 @@ func (c *Client) Convert(ctx context.Context, src io.Reader, opts ConvertOptions
 		var werr error
 		defer func() { _ = pw.CloseWithError(werr) }()
 		for _, f := range []struct{ k, v string }{
-			{"formats", opts.Formats}, {"lang", opts.Lang}, {"model", opts.Model}, {"prefer", opts.Prefer},
-			{"delivery", opts.Delivery},
-			{"webhook", opts.Webhook}, {"webhook_secret", opts.WebhookSecret},
+			{"lang", opts.Lang}, {"model", opts.Model}, {"prefer", opts.Prefer},
 		} {
 			if f.v != "" {
 				if werr = mw.WriteField(f.k, f.v); werr != nil {
@@ -138,11 +135,16 @@ func (c *Client) Convert(ctx context.Context, src io.Reader, opts ConvertOptions
 	defer res.Body.Close()
 	switch res.StatusCode {
 	case http.StatusOK:
-		var r ConvertResult
-		if err := json.NewDecoder(res.Body).Decode(&r); err != nil {
+		// Keep the bytes so --json can echo the body unchanged.
+		raw, err := io.ReadAll(res.Body)
+		if err != nil {
 			return nil, err
 		}
-		return &ConvertResponse{Inline: &r}, nil
+		var r ConvertResult
+		if err := json.Unmarshal(raw, &r); err != nil {
+			return nil, err
+		}
+		return &ConvertResponse{Inline: &r, InlineRaw: raw}, nil
 	case http.StatusAccepted:
 		var j AsyncJob
 		if err := json.NewDecoder(res.Body).Decode(&j); err != nil {
@@ -313,8 +315,8 @@ func jobStateFromEvent(jobID string, m map[string]string) JobState {
 func atoiSafe(s string) int { n, _ := strconv.Atoi(s); return n }
 
 // JobResult fetches the read-once result, authenticated by the one-time `token` from the SSE
-// completed event (or a webhook). format is "markdown", "json", or "" (default markdown). It
-// returns the raw body + content type; a 410 (already consumed/expired) is a typed *APIError.
+// completed event. format is "markdown", "json", or "" (default markdown). It returns the raw
+// body + content type; a 410 (already consumed/expired) is a typed *APIError.
 func (c *Client) JobResult(ctx context.Context, jobID, format, token string) ([]byte, string, error) {
 	path := "/jobs/" + jobID + "/result"
 	switch format {

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -41,8 +42,9 @@ func TestFileKeyring(t *testing.T) {
 	}
 }
 
-// TestFileKeyringSetKeepsPerms - Set never widens the permissions of an existing credential file.
-func TestFileKeyringSetKeepsPerms(t *testing.T) {
+// TestFileKeyringSetIsAlways0600 - every Set lands on 0600, including a rewrite (rename replaces the
+// inode, so this is the mode the new file was created with, not the old file's mode preserved).
+func TestFileKeyringSetIsAlways0600(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix permissions")
 	}
@@ -81,5 +83,33 @@ func TestDefaultBackendSelection(t *testing.T) {
 	t.Setenv("HEXREAD_KEYRING", "bogus")
 	if err := Default().Set("x"); err == nil {
 		t.Error("bogus backend must refuse to store a secret")
+	}
+}
+
+// TestDefaultFilePath - the credential path resolves under the config dir, and is never relative:
+// that would put the API key in whatever directory the process happened to be in.
+func TestDefaultFilePath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
+	if p := DefaultFile().path; !filepath.IsAbs(p) || !strings.Contains(p, "hexread") {
+		t.Fatalf("path = %q, want an absolute path under the config dir", p)
+	}
+
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "") // windows
+	f := DefaultFile()
+	if f.path != "" {
+		if !filepath.IsAbs(f.path) {
+			t.Fatalf("credential path %q is relative", f.path)
+		}
+		return
+	}
+	if _, err := f.Get(); err == nil {
+		t.Error("Get with no config dir must error, not read a relative path")
+	}
+	if err := f.Set("hr_live_x"); err == nil {
+		t.Error("Set with no config dir must error, not write a relative path")
 	}
 }

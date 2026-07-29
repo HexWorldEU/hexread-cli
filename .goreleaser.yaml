@@ -34,6 +34,9 @@ builds:
 
 archives:
   - id: hexread
+    # Pinned, not inherited: scripts/install.sh builds this filename by hand, and the action is
+    # pinned only to `~> v2`. scripts/check-archive-name.sh asserts the two stay in agreement.
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats: [tar.gz]
     format_overrides:
       - goos: windows

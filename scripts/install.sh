@@ -7,11 +7,12 @@
 #
 #   curl -fsSL https://hexread.com/install | sh
 #   curl -fsSL https://hexread.com/install | sh -s -- --bin-dir ~/.local/bin
+#   HEXREAD_BIN_DIR=~/.local/bin curl -fsSL https://hexread.com/install | sh   # same, via env
 #   HEXREAD_REQUIRE_COSIGN=1 curl -fsSL https://hexread.com/install | sh   # require a cosign signature
 set -eu
 # pipefail is not POSIX (dash lacks it); enable it where the shell supports it (bash/ksh/zsh) so a
 # broken curl in a pipe fails the step instead of feeding a truncated file downstream.
-# shellcheck disable=SC3040
+# shellcheck disable=SC3040,SC2015  # probed in a subshell first; `|| true` is the intended no-op
 (set -o pipefail) 2>/dev/null && set -o pipefail || true
 
 # The whole installer runs inside main() invoked on the LAST line, so `curl … | sh` executes nothing
@@ -22,8 +23,9 @@ main() {
   # Best-effort by default; HEXREAD_REQUIRE_COSIGN=1 / --require-cosign makes the signature mandatory.
   REQUIRE_COSIGN="${HEXREAD_REQUIRE_COSIGN:-0}"
   [ "$REQUIRE_COSIGN" = "0" ] && REQUIRE_COSIGN=""
-  # The cosign keyless identity that signed the release (GitHub Actions OIDC).
-  CERT_IDENTITY_RE="https://github.com/${REPO}/.github/workflows/release.yml@refs/tags/v.*"
+  # The cosign keyless identity that signed the release (GitHub Actions OIDC). Anchored and
+  # dot-escaped, so an identity that merely contains this string cannot satisfy it.
+  CERT_IDENTITY_RE="^https://github\\.com/${REPO}/\\.github/workflows/release\\.yml@refs/tags/v.+$"
   CERT_OIDC_ISSUER="https://token.actions.githubusercontent.com"
 
   while [ $# -gt 0 ]; do
@@ -105,6 +107,17 @@ main() {
     exit 1
   fi
   echo "✓ Installed hexread ${tag} → ${BIN_DIR}/hexread"
+
+  # Installing outside PATH is the one way this script succeeds and still leaves the user with
+  # `hexread: command not found`. Say so with the fix, but don't fail: the binary is installed.
+  case ":${PATH}:" in
+    *":${BIN_DIR}:"*) ;;
+    *)
+      echo "note: ${BIN_DIR} is not on your PATH - 'hexread' will not be found yet." >&2
+      echo "      Add it, e.g.:  echo 'export PATH=\"${BIN_DIR}:\$PATH\"' >> ~/.profile && . ~/.profile" >&2
+      ;;
+  esac
+
   "${BIN_DIR}/hexread" version || true
 }
 

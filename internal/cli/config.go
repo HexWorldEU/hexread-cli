@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -43,8 +44,15 @@ func resolveConfig(cmd *cobra.Command) (Config, error) {
 		base = defaultBaseURL
 	}
 	base = strings.TrimRight(base, "/")
-	if u, err := url.Parse(base); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+	u, err := url.Parse(base)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return Config{}, withExit(exitUsage, fmt.Errorf("invalid base URL %q (need http(s)://host[/path])", base))
+	}
+	// A plain-http base sends the API key in a cleartext Authorization header on every request.
+	// http stays allowed for a local dev server, where there is no wire to sniff, and nowhere else.
+	if u.Scheme == "http" && !isLoopbackHost(u.Hostname()) {
+		return Config{}, withExit(exitUsage, fmt.Errorf(
+			"refusing to send your API key in cleartext to %q - use https:// (http is allowed only for localhost)", base))
 	}
 
 	quiet, _ := cmd.Flags().GetBool("quiet")
@@ -56,7 +64,17 @@ func resolveConfig(cmd *cobra.Command) (Config, error) {
 	return Config{BaseURL: base, Output: output, Quiet: quiet}, nil
 }
 
-// configFilePath returns ~/.config/hexread/config.yaml (per-OS UserConfigDir).
+// isLoopbackHost reports whether host names this machine, by name or by address (both IP families).
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// configFilePath returns <os.UserConfigDir>/hexread/config.yaml - ~/.config on Linux,
+// ~/Library/Application Support on macOS, %AppData% on Windows.
 func configFilePath() string {
 	dir, err := os.UserConfigDir()
 	if err != nil || dir == "" {

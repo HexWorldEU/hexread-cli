@@ -62,7 +62,7 @@ func newJobsResult() *cobra.Command {
 		Use:   "result <job_id>",
 		Short: "Fetch a job's result (read-once)",
 		Long: "Fetch a job's read-once result. Requires the one-time --token delivered in the SSE\n" +
-			"`completed` event or the webhook payload; the result can be retrieved exactly once.",
+			"`completed` event; the result can be retrieved exactly once.",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -71,7 +71,7 @@ func newJobsResult() *cobra.Command {
 				return err
 			}
 			if token == "" {
-				return withExit(exitUsage, errors.New("a --token is required (delivered via SSE or webhook)"))
+				return withExit(exitUsage, errors.New("a --token is required (delivered on the SSE completed event)"))
 			}
 			_, format := outFormat(asJSON)
 			body, _, err := c.JobResult(cmd.Context(), args[0], format, token)
@@ -82,7 +82,7 @@ func newJobsResult() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "fetch the structured JSON result")
-	cmd.Flags().StringVar(&token, "token", "", "one-time download token (from the SSE completed event or webhook)")
+	cmd.Flags().StringVar(&token, "token", "", "one-time download token (from the SSE completed event)")
 	return cmd
 }
 

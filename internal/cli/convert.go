@@ -5,10 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 
@@ -19,7 +17,7 @@ import (
 
 func newConvert() *cobra.Command {
 	var asJSON, async bool
-	var formats, lang, model, prefer, webhook, webhookSecret string
+	var lang, model, prefer string
 	cmd := &cobra.Command{
 		Use:   "convert [file|-]",
 		Short: "Convert a PDF or image to Markdown",
@@ -40,36 +38,14 @@ func newConvert() *cobra.Command {
 			defer closeFn()
 
 			opts := client.ConvertOptions{
-				Filename: name, Formats: formats, Lang: lang, Model: model, Prefer: prefer,
+				Filename: name, Lang: lang, Model: model, Prefer: prefer,
 				IdempotencyKey: newIdempotencyKey(),
 			}
 			if async {
 				opts.Prefer = "async"
 			}
-			if webhook != "" {
-				if err := validateWebhook(webhook, webhookSecret, prefer); err != nil {
-					return withExit(exitUsage, err)
-				}
-				// Force the async path: a sync (inline) response would never fire the webhook.
-				opts.Delivery, opts.Webhook, opts.WebhookSecret = "webhook", webhook, webhookSecret
-				opts.Prefer = "async"
-			}
 
 			_, format := outFormat(asJSON)
-			// Webhook delivery: submit + report the job; the result arrives out-of-band.
-			if opts.Webhook != "" {
-				resp, err := c.Convert(cmd.Context(), src, opts)
-				if err != nil {
-					return err
-				}
-				if resp.Job != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "Submitted job %s - the result will be delivered to your webhook.\n", resp.Job.JobID)
-					return nil
-				}
-				// Defensive: if the server still answered inline, don't discard the result.
-				fmt.Fprintln(cmd.ErrOrStderr(), "The server returned the result inline; the webhook was not used.")
-				return writeResult(cmd, cfg, inlineBody(resp.Inline, asJSON))
-			}
 			body, err := convertOnce(cmd.Context(), cmd, c, src, opts, format, !cfg.Quiet && isTerminalWriter(cmd.ErrOrStderr()))
 			if err != nil {
 				return err
@@ -80,28 +56,10 @@ func newConvert() *cobra.Command {
 	f := cmd.Flags()
 	f.BoolVar(&asJSON, "json", false, "output the structured JSON result instead of Markdown")
 	f.BoolVar(&async, "async", false, "force the async path (return a job, stream progress)")
-	f.StringVar(&formats, "formats", "", "comma-separated output formats (md,json)")
 	f.StringVar(&lang, "lang", "", "OCR language hint")
 	f.StringVar(&model, "model", "", "parser to use: auto, mineru-2.5, granite-docling, paddleocr-vl")
 	f.StringVar(&prefer, "prefer", "", "force sync|async (else the server decides)")
-	f.StringVar(&webhook, "webhook", "", "deliver the result to this URL (HMAC-signed)")
-	f.StringVar(&webhookSecret, "webhook-secret", "", "signing secret for --webhook (min 16 chars)")
 	return cmd
-}
-
-// validateWebhook fails fast on webhook option combinations the server would reject anyway.
-func validateWebhook(webhook, secret, prefer string) error {
-	u, err := url.Parse(webhook)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return fmt.Errorf("invalid --webhook URL %q (need an absolute http(s) URL)", webhook)
-	}
-	if len(secret) < 16 {
-		return errors.New("--webhook needs a --webhook-secret of at least 16 characters (it HMAC-signs the delivery)")
-	}
-	if prefer == "sync" {
-		return errors.New("--webhook needs the async path; drop --prefer sync")
-	}
-	return nil
 }
 
 // convertOnce runs one conversion: POST, then for an async job wait (optionally streaming progress)
@@ -112,7 +70,7 @@ func convertOnce(ctx context.Context, cmd *cobra.Command, c *client.Client, src 
 		return nil, err
 	}
 	if resp.Inline != nil {
-		return inlineBody(resp.Inline, format == "json"), nil
+		return inlineBody(resp, format == "json"), nil
 	}
 	job := resp.Job
 	var onState func(client.JobState)
@@ -133,7 +91,17 @@ func convertOnce(ctx context.Context, cmd *cobra.Command, c *client.Client, src 
 		return nil, fmt.Errorf("job %s was canceled before it finished", job.JobID)
 	}
 	body, _, err := c.JobResult(ctx, job.JobID, format, st.Token)
-	return body, err
+	if err != nil {
+		// The one-time token is spent only on a successful fetch, so hand it back rather than
+		// stranding the result behind a transient network failure.
+		if st.Token != "" {
+			fmt.Fprintf(cmd.ErrOrStderr(),
+				"\nThe result was not fetched. It is still waiting - retrieve it with:\n  hexread jobs result %s --token %s\n",
+				job.JobID, st.Token)
+		}
+		return nil, err
+	}
+	return body, nil
 }
 
 // openInput returns the source reader, a multipart part name, and a close func. "-" reads stdin.
@@ -167,19 +135,31 @@ func printProgress(w io.Writer, st client.JobState) {
 	}
 }
 
-// inlineBody renders the inline result as JSON or Markdown bytes.
-func inlineBody(r *client.ConvertResult, asJSON bool) []byte {
+// inlineBody renders the inline result as JSON or Markdown bytes. The JSON is the server's response
+// body unchanged, so it matches the async path instead of dropping fields this client doesn't model.
+func inlineBody(resp *client.ConvertResponse, asJSON bool) []byte {
 	if asJSON {
-		b, _ := json.MarshalIndent(r, "", "  ")
+		if len(resp.InlineRaw) > 0 {
+			return resp.InlineRaw
+		}
+		b, _ := json.MarshalIndent(resp.Inline, "", "  ")
 		return b
 	}
-	return []byte(r.Markdown)
+	return []byte(resp.Inline.Markdown)
 }
 
-// writeResult writes to -o/--output or stdout (appending a newline for terminal Markdown).
+// writeResult writes to -o/--output or stdout (appending a newline for terminal Markdown). The
+// result can only be fetched once, so a failed -o write falls back to stdout rather than discarding
+// the bytes - and still returns the error, so the exit code reports the failure.
 func writeResult(cmd *cobra.Command, cfg Config, body []byte) error {
+	var writeErr error
 	if cfg.Output != "" {
-		return os.WriteFile(cfg.Output, body, 0o644)
+		writeErr = os.WriteFile(cfg.Output, body, 0o644)
+		if writeErr == nil {
+			return nil
+		}
+		fmt.Fprintf(cmd.ErrOrStderr(),
+			"could not write %s - printing the result instead; it cannot be fetched again\n", cfg.Output)
 	}
 	out := cmd.OutOrStdout()
 	if _, err := out.Write(body); err != nil {
@@ -188,7 +168,7 @@ func writeResult(cmd *cobra.Command, cfg Config, body []byte) error {
 	if len(body) > 0 && body[len(body)-1] != '\n' {
 		_, _ = out.Write([]byte("\n"))
 	}
-	return nil
+	return writeErr
 }
 
 // typeForJobError maps a job-failure error_code (from the SSE `error` event, which carries no

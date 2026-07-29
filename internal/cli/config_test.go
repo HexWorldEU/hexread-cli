@@ -109,3 +109,19 @@ func writeConfig(t *testing.T, dir, body string) {
 		t.Fatal(err)
 	}
 }
+
+// TestPlainHTTPBaseURLRefusedOffLoopback - http would send the API key in the clear, so it is
+// accepted only against loopback.
+func TestPlainHTTPBaseURLRefusedOffLoopback(t *testing.T) {
+	for _, base := range []string{"http://api.hexread.com/v1", "http://203.0.113.9/v1"} {
+		if _, code, _ := runCLI(t, "hr_live_k", "usage", "--base-url", base); code != exitUsage {
+			t.Errorf("base %q: exit = %d, want %d (cleartext key refused)", base, code, exitUsage)
+		}
+	}
+	// No server is reached here, so any exit other than the usage rejection means the base passed.
+	for _, base := range []string{"http://localhost:8080/v1", "http://127.0.0.1:8080/v1", "https://api.hexread.com/v1"} {
+		if _, code, _ := runCLI(t, "hr_live_k", "usage", "--base-url", base); code == exitUsage {
+			t.Errorf("base %q: rejected as a usage error, want it accepted", base)
+		}
+	}
+}

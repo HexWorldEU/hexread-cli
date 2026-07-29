@@ -59,16 +59,21 @@ func TestConvertCmdSyncMarkdown(t *testing.T) {
 	}
 }
 
-// TestConvertCmdJSON - --json prints the structured result.
+// TestConvertCmdJSON - --json prints the server's result body verbatim, so fields this client's
+// types do not model survive instead of being dropped by a re-marshal.
 func TestConvertCmdJSON(t *testing.T) {
+	const body = `{"markdown":"# X","pages":[],"meta":{"pages":1,"sha256":"ab","unmodeled":"kept"}}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"markdown":"# X","pages":[],"meta":{"pages":1}}`)
+		_, _ = io.WriteString(w, body)
 	}))
 	defer srv.Close()
 	out, code, _ := runCLI(t, "k", "convert", "-", "--json", "--base-url", srv.URL+"/v1")
-	if code != 0 || !strings.Contains(out, `"markdown": "# X"`) {
-		t.Fatalf("json out=%q code=%d", out, code)
+	if code != 0 || strings.TrimSpace(out) != body {
+		t.Fatalf("json out=%q code=%d, want the server body verbatim", out, code)
+	}
+	if !strings.Contains(out, `"unmodeled":"kept"`) {
+		t.Fatalf("--json dropped an unmodeled field: %q", out)
 	}
 }
 
@@ -92,7 +97,7 @@ func TestConvertCmdStdinToFile(t *testing.T) {
 
 // TestConvertCmdNotLoggedIn - no credential → exit 3 (auth).
 func TestConvertCmdNotLoggedIn(t *testing.T) {
-	if _, code, _ := runCLI(t, "", "convert", "-", "--base-url", "http://x/v1"); code != exitAuth {
+	if _, code, _ := runCLI(t, "", "convert", "-", "--base-url", "https://x/v1"); code != exitAuth {
 		t.Fatalf("no-cred convert exit = %d, want %d", code, exitAuth)
 	}
 }
@@ -201,41 +206,5 @@ func TestConvertCmdCanceled(t *testing.T) {
 	_, code, errOut := runCLI(t, "k", "convert", "-", "--base-url", srv.URL+"/v1")
 	if code != exitGeneric || !strings.Contains(errOut, "canceled") {
 		t.Fatalf("canceled convert: code=%d (want %d) stderr=%q", code, exitGeneric, errOut)
-	}
-}
-
-// TestConvertWebhookValidation - bad webhook option combinations fail fast as usage errors,
-// before anything is uploaded.
-func TestConvertWebhookValidation(t *testing.T) {
-	for name, args := range map[string][]string{
-		"relative URL":   {"convert", "-", "--webhook", "not-a-url", "--webhook-secret", "0123456789abcdef"},
-		"short secret":   {"convert", "-", "--webhook", "https://example.com/hook", "--webhook-secret", "short"},
-		"prefer sync":    {"convert", "-", "--webhook", "https://example.com/hook", "--webhook-secret", "0123456789abcdef", "--prefer", "sync"},
-		"missing secret": {"convert", "-", "--webhook", "https://example.com/hook"},
-	} {
-		args = append(args, "--base-url", "http://127.0.0.1:0/v1")
-		if _, code, _ := runCLI(t, "k", args...); code != exitUsage {
-			t.Errorf("%s: exit = %d, want %d", name, code, exitUsage)
-		}
-	}
-}
-
-// TestConvertWebhookForcesAsync - --webhook submits with prefer=async so the server can't pick
-// the sync path (where it would silently ignore the webhook), and reports the job on stderr.
-func TestConvertWebhookForcesAsync(t *testing.T) {
-	var gotPrefer, gotDelivery string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseMultipartForm(1 << 20)
-		gotPrefer = r.FormValue("prefer")
-		gotDelivery = r.FormValue("delivery")
-		w.WriteHeader(http.StatusAccepted)
-		_, _ = io.WriteString(w, `{"job_id":"j3","status":"queued","links":{}}`)
-	}))
-	defer srv.Close()
-	_, code, errOut := runCLI(t, "k", "convert", "-",
-		"--webhook", "https://example.com/hook", "--webhook-secret", "0123456789abcdef",
-		"--base-url", srv.URL+"/v1")
-	if code != 0 || gotPrefer != "async" || gotDelivery != "webhook" || !strings.Contains(errOut, "j3") {
-		t.Fatalf("webhook submit: code=%d prefer=%q delivery=%q stderr=%q", code, gotPrefer, gotDelivery, errOut)
 	}
 }
