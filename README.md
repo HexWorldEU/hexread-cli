@@ -42,7 +42,7 @@ cosign verify-blob \
 ## Quick start
 
 ```sh
-# Create an API key in your HexRead dashboard, then:
+# Create an API key in your HexRead dashboard (API access requires a paid plan), then:
 hexread login --key-stdin                 # paste the key; stored 0600 (or OS keychain)
 
 hexread convert report.pdf -o report.md   # convert a single file
@@ -50,12 +50,14 @@ hexread convert - < scan.png              # stdin → Markdown on stdout
 hexread batch './docs/*.pdf' -o ./md      # convert many files in parallel
 hexread watch ./inbox -o ./md             # convert files as they appear
 hexread usage                             # page usage / allowance + concurrency
-hexread keys list                         # manage API keys
 hexread version                           # CLI version
 ```
 
-`hexread --help` lists every command. In CI, set `HEXREAD_API_KEY` instead of storing a
-credential on disk.
+API keys are created and revoked in your HexRead dashboard; the CLI's `keys` subcommands
+require a signed-in session, so an API-key credential cannot manage keys.
+
+`hexread --help` lists every command and `hexread <command> --help` its flags. In CI, set
+`HEXREAD_API_KEY` instead of storing a credential on disk.
 
 ## Configuration
 
@@ -64,10 +66,12 @@ Precedence: **flags > environment > config file > defaults**.
 | Environment variable | Meaning |
 |---|---|
 | `HEXREAD_API_KEY` | API key for this invocation (nothing written to disk) |
-| `HEXREAD_BASE_URL` | API base URL (default `https://api.hexread.com/v1`) |
+| `HEXREAD_BASE_URL` | API base URL (default `https://api.hexread.com/v1`; `HEXREAD_API` is a legacy alias) |
 | `HEXREAD_KEYRING` | credential store: `file` (default, a 0600 file) or `system` (OS keychain) |
+| `HEXREAD_DEVICE_AUTH_URL`, `HEXREAD_TOKEN_URL`, `HEXREAD_CLIENT_ID` | override the device sign-in endpoints/client (dev stacks; a release bakes production defaults) |
 
-Optional config file `hexread/config.yaml` in your OS config directory - `~/.config` on
+The `file` credential store lives at `hexread/credential` (mode 0600) in your OS config
+directory. Optional config file `hexread/config.yaml` in the same directory - `~/.config` on
 Linux, `~/Library/Application Support` on macOS, `%AppData%` on Windows (flat `key: value`
 lines):
 
@@ -92,8 +96,25 @@ Errors map to stable, scriptable exit codes that mirror the API's error classes:
 | 7 | unprocessable (validation, not found, conflict, gone) |
 | 8 | payload too large |
 | 9 | capacity (transient - retry later) |
-| 10 | partial batch failure (some files failed) |
+| 10 | batch failure (one or more files failed) |
 | 130 | interrupted (Ctrl-C) |
+
+## Commands and flags
+
+| Command | Purpose |
+|---|---|
+| `login` / `logout` | store a credential (browser device grant, or `--key`/`--key-stdin`) / remove it |
+| `whoami` | print the signed-in identity |
+| `convert <file>` | convert one file (`-` = stdin). Flags: `--model`, `--prefer sync\|async`, `--json`, `--lang` |
+| `batch <glob>` | convert many files into `-o <dir>`. Flags: `--concurrency`, `--json` |
+| `watch <dir>` | convert files as they appear in `-o <dir>`. Flags: `--json` |
+| `usage` | page allowance, concurrency, API access (`--json`) |
+| `jobs status\|result\|cancel <id>` | inspect/fetch/cancel an async job |
+| `version` | CLI version (`--json`) |
+
+Global flags: `-o/--output` (file, or directory for `batch`/`watch`), `--quiet`, `--base-url`.
+`hexread <command> --help` documents each command. Note: `--lang` is an OCR hint that only some
+models honor; the default model ignores it.
 
 ## License
 

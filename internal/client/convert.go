@@ -136,7 +136,7 @@ func (c *Client) Convert(ctx context.Context, src io.Reader, opts ConvertOptions
 	switch res.StatusCode {
 	case http.StatusOK:
 		// Keep the bytes so --json can echo the body unchanged.
-		raw, err := io.ReadAll(res.Body)
+		raw, err := readAllLimited(res.Body, maxResultBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -164,6 +164,11 @@ const sseMaxRetries = 5
 // sseRetryBase scales the reconnect backoff (attempt × base); tests shrink it.
 var sseRetryBase = time.Second
 
+// sseMaxTotalDuration is an absolute ceiling on one JobEvents call. The per-reconnect budget resets
+// on state changes (so long jobs survive), so a server flapping state could reconnect forever without
+// this wall-clock bound. A var so tests can shrink it.
+var sseMaxTotalDuration = 2 * time.Hour
+
 // JobEvents follows a job's Server-Sent Events until a terminal event, invoking onState per
 // update, and returns the terminal state. The completed event carries the one-time download
 // token (st.Token) required to fetch the result. Stream drops are survived by reconnecting
@@ -171,6 +176,9 @@ var sseRetryBase = time.Second
 // responses are transient (they must not strand the one-time result token) and consume the
 // bounded retry budget.
 func (c *Client) JobEvents(ctx context.Context, jobID string, onState func(JobState)) (JobState, error) {
+	// Absolute backstop against a server that fakes progress to defeat the per-reconnect budget.
+	ctx, cancel := context.WithTimeout(ctx, sseMaxTotalDuration)
+	defer cancel()
 	var last JobState
 	var lastEventID string
 	retries := 0
@@ -340,6 +348,6 @@ func (c *Client) JobResult(ctx context.Context, jobID, format, token string) ([]
 	if res.StatusCode != http.StatusOK {
 		return nil, "", errorFrom(res)
 	}
-	body, err := io.ReadAll(res.Body)
+	body, err := readAllLimited(res.Body, maxResultBytes)
 	return body, res.Header.Get("Content-Type"), err
 }

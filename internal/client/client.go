@@ -94,9 +94,39 @@ func New(baseURL, key string) *Client {
 	return &Client{
 		BaseURL: strings.TrimRight(baseURL, "/"),
 		Key:     key,
-		API:     &http.Client{Timeout: 60 * time.Second},
-		Stream:  &http.Client{}, // dial/TLS bounds come from http.DefaultTransport
+		API:     &http.Client{Timeout: 60 * time.Second, CheckRedirect: noCrossOriginRedirect},
+		Stream:  &http.Client{CheckRedirect: noCrossOriginRedirect}, // dial/TLS bounds come from http.DefaultTransport
 	}
+}
+
+// noCrossOriginRedirect refuses a redirect that changes scheme or host, so the Bearer key can never
+// be re-sent to another origin or downgraded onto cleartext http. The API never redirects off-origin.
+func noCrossOriginRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) == 0 {
+		return nil
+	}
+	orig := via[0].URL
+	if req.URL.Scheme != orig.Scheme || req.URL.Host != orig.Host {
+		return fmt.Errorf("refusing cross-origin redirect %s://%s -> %s://%s",
+			orig.Scheme, orig.Host, req.URL.Scheme, req.URL.Host)
+	}
+	return nil
+}
+
+// maxResultBytes caps a conversion result read from the timeout-less Stream client, so a hostile or
+// wedged server cannot grow the process without limit. Far above any real result.
+const maxResultBytes = 512 << 20 // 512 MiB
+
+// readAllLimited reads up to max bytes, erroring if the source has more instead of growing unbounded.
+func readAllLimited(r io.Reader, max int64) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > max {
+		return nil, fmt.Errorf("response body exceeds the %d-byte limit", max)
+	}
+	return b, nil
 }
 
 // newRequest builds a request with the auth + client-identification headers every call sends.

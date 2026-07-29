@@ -24,13 +24,14 @@ func Execute() {
 	go func() { <-ctx.Done(); stop() }()
 
 	err := newRoot().ExecuteContext(ctx)
-	if err == nil {
-		return
-	}
-	// A termination signal arrived and the command failed: report "interrupted" no matter how
-	// the cancellation surfaced (net/http wraps it as the signal cause, not context.Canceled).
+	// A termination signal arrived: report "interrupted" no matter how the command returned. Commands
+	// that abort an in-flight request surface the signal as an error, but a long-running command like
+	// `watch` drains and returns nil on ctx.Done() - both are a Ctrl-C and both must exit 130, not 0.
 	if ctx.Err() != nil {
 		os.Exit(exitInterrupted) // the shell already shows ^C; no message needed
+	}
+	if err == nil {
+		return
 	}
 	fmt.Fprintln(os.Stderr, "hexread:", err)
 	os.Exit(exitCode(err))

@@ -17,6 +17,10 @@ type Config struct {
 	BaseURL string
 	Output  string
 	Quiet   bool
+	// BaseFromConfigFile is true when BaseURL came from the config file (not a flag/env). A config
+	// file is the one base-URL source a user does not re-state on each run, so it is the stealthy
+	// redirect vector clientFor surfaces before sending the credential.
+	BaseFromConfigFile bool
 }
 
 const defaultBaseURL = "https://api.hexread.com/v1"
@@ -37,8 +41,10 @@ func resolveConfig(cmd *cobra.Command) (Config, error) {
 	if base == "" {
 		base = os.Getenv("HEXREAD_API") // legacy name, kept for back-compat
 	}
-	if base == "" {
+	fromConfigFile := false
+	if base == "" && file["base-url"] != "" {
 		base = file["base-url"]
+		fromConfigFile = true
 	}
 	if base == "" {
 		base = defaultBaseURL
@@ -61,7 +67,7 @@ func resolveConfig(cmd *cobra.Command) (Config, error) {
 	}
 
 	output, _ := cmd.Flags().GetString("output")
-	return Config{BaseURL: base, Output: output, Quiet: quiet}, nil
+	return Config{BaseURL: base, Output: output, Quiet: quiet, BaseFromConfigFile: fromConfigFile}, nil
 }
 
 // isLoopbackHost reports whether host names this machine, by name or by address (both IP families).

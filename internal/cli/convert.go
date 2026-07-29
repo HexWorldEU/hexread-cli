@@ -154,7 +154,7 @@ func inlineBody(resp *client.ConvertResponse, asJSON bool) []byte {
 func writeResult(cmd *cobra.Command, cfg Config, body []byte) error {
 	var writeErr error
 	if cfg.Output != "" {
-		writeErr = os.WriteFile(cfg.Output, body, 0o644)
+		writeErr = os.WriteFile(cfg.Output, body, outputFileMode)
 		if writeErr == nil {
 			return nil
 		}

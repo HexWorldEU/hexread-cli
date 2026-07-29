@@ -15,6 +15,7 @@ func newKeys() *cobra.Command {
 		Use:          "keys",
 		Short:        "Manage API keys",
 		SilenceUsage: true,
+		RunE:         parentRunE,
 	}
 	cmd.AddCommand(newKeysList(), newKeysCreate(), newKeysRotate(), newKeysRevoke())
 	return cmd

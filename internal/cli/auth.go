@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/HexWorldEU/hexread-cli/internal/client"
 	"github.com/HexWorldEU/hexread-cli/internal/deviceflow"
@@ -23,11 +24,11 @@ func newLogin() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Sign in via browser, or store an API key",
-		Long: "Sign in to HexRead. With no flags, this opens browser sign-in (an OAuth device\n" +
-			"grant) and stores the resulting API key. Headless setups pass an existing key\n" +
-			"instead (create one in your HexRead dashboard); prefer --key-stdin so the secret\n" +
-			"never appears in shell history or process lists. A passed key is validated\n" +
-			"against the API unless --no-validate is given.",
+		Long: "Sign in to HexRead. With no flags, this starts an OAuth device grant: it prints a\n" +
+			"URL and one-time code for you to open in a browser, then stores the resulting API\n" +
+			"key. Headless setups pass an existing key instead (create one in your HexRead\n" +
+			"dashboard); prefer --key-stdin so the secret never appears in shell history or\n" +
+			"process lists. A passed key is validated against the API unless --no-validate is given.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -38,11 +39,10 @@ func newLogin() *cobra.Command {
 			kr := keyring.Default()
 
 			if keyStdin {
-				b, err := io.ReadAll(io.LimitReader(os.Stdin, 4<<10))
+				key, err = readKeyStdin(cmd)
 				if err != nil {
 					return err
 				}
-				key = strings.TrimSpace(string(b))
 				if key == "" {
 					return withExit(exitUsage, errors.New("--key-stdin was given but stdin carried no key"))
 				}
@@ -57,6 +57,26 @@ func newLogin() *cobra.Command {
 	cmd.Flags().BoolVar(&keyStdin, "key-stdin", false, "read the API key from stdin (headless)")
 	cmd.Flags().BoolVar(&noValidate, "no-validate", false, "store the key without validating it against the API")
 	return cmd
+}
+
+// readKeyStdin reads the API key from stdin. On a terminal it disables echo so a pasted secret is not
+// shown; a piped/redirected stdin (CI) is read as a plain bounded stream.
+func readKeyStdin(cmd *cobra.Command) (string, error) {
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		fmt.Fprint(cmd.ErrOrStderr(), "Paste your API key (input hidden): ")
+		b, err := term.ReadPassword(fd)
+		fmt.Fprintln(cmd.ErrOrStderr())
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(b)), nil
+	}
+	b, err := io.ReadAll(io.LimitReader(os.Stdin, 4<<10))
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(b)), nil
 }
 
 func storeKey(cmd *cobra.Command, cfg Config, kr keyring.Keyring, key string, noValidate bool) error {
@@ -173,7 +193,12 @@ func newWhoami() *cobra.Command {
 				}
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s (%s)\n", id.Sub, id.Tier)
+			out, closeOut, err := commandOut(cmd)
+			if err != nil {
+				return err
+			}
+			defer closeOut()
+			fmt.Fprintf(out, "%s (%s)\n", id.Sub, id.Tier)
 			return nil
 		},
 	}

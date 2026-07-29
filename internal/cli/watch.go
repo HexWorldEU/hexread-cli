@@ -45,7 +45,7 @@ func newWatch() *cobra.Command {
 			}
 			ext, format := outFormat(asJSON)
 			wr := &watchRunner{
-				cmd: cmd, c: c, outDir: cfg.Output, ext: ext, format: format,
+				cmd: cmd, c: c, outDir: cfg.Output, ext: ext, format: format, quiet: cfg.Quiet,
 				// In-flight conversions must survive the Ctrl-C that stops the watch loop,
 				// so they run on a detached context.
 				convCtx:   context.WithoutCancel(cmd.Context()),
@@ -65,6 +65,7 @@ type watchRunner struct {
 	outDir  string
 	ext     string
 	format  string
+	quiet   bool
 	convCtx context.Context
 
 	mu        sync.Mutex
@@ -83,7 +84,9 @@ func (wr *watchRunner) run(ctx context.Context, dir string) error {
 	if err := w.Add(dir); err != nil {
 		return err
 	}
-	fmt.Fprintf(cmd.ErrOrStderr(), "Watching %s → %s (Ctrl-C to stop)…\n", dir, wr.outDir)
+	if !wr.quiet {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Watching %s → %s (Ctrl-C to stop)…\n", dir, wr.outDir)
+	}
 
 	timers := map[string]*time.Timer{}
 	defer func() {
@@ -97,7 +100,9 @@ func (wr *watchRunner) run(ctx context.Context, dir string) error {
 		wr.stopping = true
 		wr.mu.Unlock()
 		wr.wg.Wait()
-		fmt.Fprintln(cmd.ErrOrStderr(), "\nStopped.")
+		if !wr.quiet {
+			fmt.Fprintln(cmd.ErrOrStderr(), "\nStopped.")
+		}
 	}()
 	for {
 		select {
@@ -159,7 +164,9 @@ func (wr *watchRunner) maybeConvert(path string) {
 			wr.mu.Unlock()
 			return
 		}
-		fmt.Fprintf(wr.cmd.ErrOrStderr(), "ok    %s → %s\n", filepath.Base(path), out)
+		if !wr.quiet {
+			fmt.Fprintf(wr.cmd.ErrOrStderr(), "ok    %s → %s\n", filepath.Base(path), out)
+		}
 	}()
 }
 

@@ -9,9 +9,42 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// TestJobEventsBoundedAgainstStateFlap - a server that alternates its phase every reconnect keeps
+// `progressed` true, so the per-reconnect budget never trips; only the absolute wall-clock deadline
+// stops the loop. Without it the client would reconnect forever.
+func TestJobEventsBoundedAgainstStateFlap(t *testing.T) {
+	origBase, origMax := sseRetryBase, sseMaxTotalDuration
+	sseRetryBase = time.Millisecond
+	sseMaxTotalDuration = 150 * time.Millisecond
+	defer func() { sseRetryBase, sseMaxTotalDuration = origBase, origMax }()
+
+	var n int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		phase := "queued"
+		if atomic.AddInt32(&n, 1)%2 == 0 {
+			phase = "warming"
+		}
+		_, _ = io.WriteString(w, "event: phase\ndata: {\"event\":\"phase\",\"phase\":\""+phase+"\"}\n\n")
+	}))
+	defer srv.Close()
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = New(srv.URL+"/v1", "k").JobEvents(context.Background(), "j", func(JobState) {})
+		close(done)
+	}()
+	select {
+	case <-done: // returned (bounded) - good
+	case <-time.After(5 * time.Second):
+		t.Fatal("JobEvents did not return - the state-flap reconnect loop is unbounded")
+	}
+}
 
 // TestConvertSyncInline - a 200 returns the inline result; the file is streamed as multipart and
 // the auto Idempotency-Key is sent.

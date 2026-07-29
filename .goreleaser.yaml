@@ -66,8 +66,10 @@ signs:
     artifacts: checksum
     output: true
 
-# Homebrew cask (pre-built binary): brew install HexWorldEU/tap/hexread
-homebrew_casks:
+# Homebrew formula: brew install HexWorldEU/tap/hexread. A formula (not a cask) so it installs on
+# macOS AND Linux. `brews` is soft-deprecated in goreleaser but is the only cross-platform path and
+# stays valid under the release job's `~> v2` pin; revisit when moving to v3.
+brews:
   - name: hexread
     repository:
       owner: HexWorldEU
@@ -76,14 +78,9 @@ homebrew_casks:
     skip_upload: auto # never publish a prerelease (-rc) tag to the tap
     homepage: https://hexread.com
     description: Command-line client for HexRead - convert PDFs and images to Markdown
-    # Not Apple-notarized: strip the quarantine bit so hexread runs without the
-    # macOS "unidentified developer" block.
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/hexread"]
-          end
+    license: MIT
+    test: |
+      system "#{bin}/hexread", "version"
 
 scoops:
   - repository:

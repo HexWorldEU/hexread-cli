@@ -13,6 +13,7 @@ func newJobs() *cobra.Command {
 		Use:          "jobs",
 		Short:        "Inspect, fetch, or cancel async conversion jobs",
 		SilenceUsage: true,
+		RunE:         parentRunE,
 	}
 	cmd.AddCommand(newJobsStatus(), newJobsResult(), newJobsCancel())
 	return cmd
@@ -34,9 +35,14 @@ func newJobsStatus() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			out, closeOut, err := commandOut(cmd)
+			if err != nil {
+				return err
+			}
+			defer closeOut()
 			if asJSON {
 				b, _ := json.MarshalIndent(st, "", "  ")
-				fmt.Fprintln(cmd.OutOrStdout(), string(b))
+				fmt.Fprintln(out, string(b))
 				return nil
 			}
 			status := st.Status
@@ -44,9 +50,9 @@ func newJobsStatus() *cobra.Command {
 				status += " (" + st.ErrorCode + ")" // surface the reason, e.g. failed (cancelled)
 			}
 			if st.Pages > 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s  %s  (%d/%d pages)\n", st.JobID, status, st.PagesDone, st.Pages)
+				fmt.Fprintf(out, "%s  %s  (%d/%d pages)\n", st.JobID, status, st.PagesDone, st.Pages)
 			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s  %s\n", st.JobID, status)
+				fmt.Fprintf(out, "%s  %s\n", st.JobID, status)
 			}
 			return nil
 		},

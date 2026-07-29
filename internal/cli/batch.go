@@ -62,7 +62,7 @@ func newBatch() *cobra.Command {
 				return err
 			}
 			results := runBatch(cmd, c, files, cfg.Output, ext, format, workers)
-			failed := printBatchTable(cmd, results)
+			failed := printBatchTable(cmd, results, cfg.Quiet)
 
 			if failed > 0 {
 				return withExit(exitPartialBatch, fmt.Errorf("%d of %d file(s) failed", failed, len(results)))
@@ -150,23 +150,32 @@ func convertFileTo(ctx context.Context, cmd *cobra.Command, c *client.Client, pa
 	if err != nil {
 		return batchResult{file: path, err: err}
 	}
-	if err := os.WriteFile(out, body, 0o644); err != nil {
+	if err := os.WriteFile(out, body, outputFileMode); err != nil {
 		return batchResult{file: path, err: err}
 	}
 	return batchResult{file: path, out: out}
 }
 
-func printBatchTable(cmd *cobra.Command, results []batchResult) (failed int) {
+// printBatchTable reports each file's outcome and returns the failure count. quiet suppresses the
+// per-file table (the caller still surfaces failures via the "N of M failed" error + exit 10).
+func printBatchTable(cmd *cobra.Command, results []batchResult, quiet bool) (failed int) {
 	tw := tabwriter.NewWriter(cmd.ErrOrStderr(), 0, 2, 2, ' ', 0)
 	for _, r := range results {
 		if r.err != nil {
 			failed++
+		}
+		if quiet {
+			continue
+		}
+		if r.err != nil {
 			fmt.Fprintf(tw, "FAIL\t%s\t%s\n", r.file, errMessage(r.err))
 		} else {
 			fmt.Fprintf(tw, "ok\t%s\t→ %s\n", r.file, r.out)
 		}
 	}
-	_ = tw.Flush()
+	if !quiet {
+		_ = tw.Flush()
+	}
 	return failed
 }
 

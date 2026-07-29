@@ -103,6 +103,12 @@ func (f *File) Get() (string, error) {
 	if f.path == "" {
 		return "", errNoConfigDir
 	}
+	// Writes are 0600, but a restore/copy/sync can widen the mode. Warn (don't fail) so a
+	// group/world-readable credential is not silently exposed.
+	if info, err := os.Stat(f.path); err == nil && info.Mode().Perm()&0o077 != 0 {
+		fmt.Fprintf(os.Stderr, "hexread: warning: credential file %s is accessible to other users (mode %#o); run: chmod 600 %s\n",
+			f.path, info.Mode().Perm(), f.path)
+	}
 	b, err := os.ReadFile(f.path)
 	if os.IsNotExist(err) {
 		return "", ErrNotFound

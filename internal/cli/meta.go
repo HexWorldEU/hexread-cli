@@ -18,7 +18,11 @@ func newVersion() *cobra.Command {
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			info := version.Get("hexread-cli")
-			out := cmd.OutOrStdout()
+			out, closeOut, err := commandOut(cmd)
+			if err != nil {
+				return err
+			}
+			defer closeOut()
 			if asJSON {
 				b, _ := json.MarshalIndent(info, "", "  ")
 				fmt.Fprintln(out, string(b))

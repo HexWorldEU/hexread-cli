@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -19,15 +20,28 @@ func newUsage() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			u, err := c.GetUsage(cmd.Context())
+			out, closeOut, err := commandOut(cmd)
 			if err != nil {
 				return err
 			}
-			out := cmd.OutOrStdout()
+			defer closeOut()
 			if asJSON {
-				b, _ := json.MarshalIndent(u, "", "  ")
-				fmt.Fprintln(out, string(b))
+				// Echo the server's exact JSON (pretty-printed), so `--json` carries every field the
+				// API returns - re-marshaling the CLI's typed view silently drops any it does not model.
+				raw, err := c.GetUsageRaw(cmd.Context())
+				if err != nil {
+					return err
+				}
+				var buf bytes.Buffer
+				if json.Indent(&buf, raw, "", "  ") != nil {
+					buf.Write(raw)
+				}
+				fmt.Fprintln(out, buf.String())
 				return nil
+			}
+			u, err := c.GetUsage(cmd.Context())
+			if err != nil {
+				return err
 			}
 			fmt.Fprintf(out, "tier:        %s\n", u.Tier)
 			fmt.Fprintf(out, "pages:       %d used / %d this period\n", u.Pages.Used, u.Pages.Allowance)

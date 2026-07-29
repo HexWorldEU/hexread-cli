@@ -59,6 +59,12 @@ main() {
   release_json=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest")
   tag=$(printf '%s' "$release_json" | grep -m1 '"tag_name"' | cut -d'"' -f4)
   [ -n "$tag" ] || { echo "could not determine the latest release" >&2; exit 1; }
+  # The tag is interpolated into the download URL, so it must be a plain vX.Y.Z. Reject anything else
+  # (path separators, dot-segments) before it can steer the fetch off the release path.
+  case "$tag" in
+    v[0-9]*.[0-9]*.[0-9]*) : ;;
+    *) echo "error: unexpected release tag '$tag'" >&2; exit 1 ;;
+  esac
   ver=${tag#v}
   base="https://github.com/${REPO}/releases/download/${tag}"
   archive="hexread_${ver}_${os}_${arch}.tar.gz"

@@ -12,6 +12,25 @@ import (
 	"testing"
 )
 
+// TestParentUnknownSubcommandIsUsageError - a mistyped subcommand of a grouping command (jobs, keys)
+// must be a usage error (exit 2), not a silent help+exit-0. A bare parent still prints help (exit 0).
+func TestParentUnknownSubcommandIsUsageError(t *testing.T) {
+	for _, tc := range []struct {
+		args     []string
+		wantCode int
+	}{
+		{[]string{"jobs", "get", "x"}, exitUsage},
+		{[]string{"keys", "bogus"}, exitUsage},
+		{[]string{"jobs"}, exitOK},
+		{[]string{"keys"}, exitOK},
+	} {
+		_, code, _ := runCLI(t, "", tc.args...)
+		if code != tc.wantCode {
+			t.Errorf("%v: exit=%d, want %d", tc.args, code, tc.wantCode)
+		}
+	}
+}
+
 // TestJobsStatus - `jobs status <id>` prints the status line.
 func TestJobsStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +98,25 @@ func TestUsage(t *testing.T) {
 	out, code, _ := runCLI(t, "k", "usage", "--base-url", srv.URL+"/v1")
 	if code != 0 || !strings.Contains(out, "tier:") || !strings.Contains(out, "100 used / 5000 this period") || !strings.Contains(out, "remaining:   4900") {
 		t.Fatalf("usage out=%q code=%d", out, code)
+	}
+}
+
+// TestUsageJSONEchoesServerFields - `usage --json` must carry EVERY field the server returns (it
+// echoes the raw body), not just the subset the CLI's typed struct models.
+func TestUsageJSONEchoesServerFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"tier":"trial","api_access":true,"available_models":["mineru-2.5"],"backend_lane":"throttled_vlm","unlock_url":"https://x","pages":{"used":1,"reserved":0,"remaining":99,"allowance":100},"concurrency":{"in_use":0,"limit":1}}`)
+	}))
+	defer srv.Close()
+	out, code, _ := runCLI(t, "k", "usage", "--json", "--base-url", srv.URL+"/v1")
+	for _, field := range []string{"available_models", "backend_lane", "unlock_url"} {
+		if !strings.Contains(out, field) {
+			t.Errorf("usage --json dropped %q; out=%q", field, out)
+		}
+	}
+	if code != 0 {
+		t.Fatalf("code=%d", code)
 	}
 }
 
@@ -170,5 +208,29 @@ func TestBatchAllSucceedExit0(t *testing.T) {
 	_, code, _ := runCLI(t, "k", "batch", filepath.Join(in, "*.pdf"), "-o", t.TempDir(), "--base-url", srv.URL+"/v1")
 	if code != 0 {
 		t.Fatalf("all-success batch exit = %d, want 0", code)
+	}
+}
+
+// TestBatchQuietSuppressesTable - `--quiet` suppresses batch's per-file progress table (exit code
+// still conveys success/partial-failure).
+func TestBatchQuietSuppressesTable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/usage") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"concurrency":{"limit":2}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"markdown":"# OK","pages":[],"meta":{}}`)
+	}))
+	defer srv.Close()
+	in := t.TempDir()
+	_ = os.WriteFile(filepath.Join(in, "x.pdf"), []byte("x"), 0o644)
+	_, code, errOut := runCLI(t, "k", "batch", filepath.Join(in, "*.pdf"), "-o", t.TempDir(), "--quiet", "--base-url", srv.URL+"/v1")
+	if code != 0 {
+		t.Fatalf("quiet batch exit = %d, want 0", code)
+	}
+	if strings.Contains(errOut, "ok") || strings.Contains(errOut, "→") {
+		t.Errorf("--quiet still printed the batch table: %q", errOut)
 	}
 }

@@ -128,8 +128,32 @@ func (c *Client) GetUsage(ctx context.Context) (UsageMeters, error) {
 	return u, err
 }
 
+// GetUsageRaw returns the /usage response body verbatim (bounded), for `--json` output that must
+// carry every field the server returns rather than a re-marshaled subset of the typed view.
+func (c *Client) GetUsageRaw(ctx context.Context) ([]byte, error) {
+	return c.getRaw(ctx, "/usage")
+}
+
 func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 	return c.doJSON(ctx, http.MethodGet, path, nil, nil, out)
+}
+
+// getRaw issues a GET and returns the response body (bounded to guard against a hostile/oversized
+// body), for callers that must echo the exact server JSON rather than a re-marshaled typed view.
+func (c *Client) getRaw(ctx context.Context, path string) ([]byte, error) {
+	req, err := c.newRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	res, err := c.API.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return nil, errorFrom(res)
+	}
+	return io.ReadAll(io.LimitReader(res.Body, 1<<20))
 }
 
 // do issues a request and discards the body, returning a typed *APIError on non-2xx.
